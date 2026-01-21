@@ -226,9 +226,9 @@ ANOMALY_THRESHOLDS = {
 # ========== LLM 配置 ==========
 config_list = [
     {
-        "model": os.getenv("DEEPSEEK_MODEL", "deepseek-reasoner"),
-        "api_key": os.getenv("DEEPSEEK_API_KEY"),
-        "base_url": os.getenv("DEEPSEEK_API_BASE"),
+        "model": os.getenv("LLM_MODEL", "deepseek-reasoner"),
+        "api_key": os.getenv("LLM_API_KEY"),
+        "base_url": os.getenv("LLM_API_BASE"),
     }
 ]
 
@@ -835,4 +835,5 @@ def start_detection_chat():
 
 # ========== 程序入口 ==========
 if __name__ == "__main__":
+
     start_detection_chat()
