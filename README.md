@@ -12,7 +12,7 @@
 - 🛡️ **稳定可靠**：**支持任何格式的音频文件**，内置参数校验、异常捕获、状态重置机制，禁用 Docker 依赖，**适配 Windows 路径规范**，部署门槛低。
 ---
 # 流水线
-
+<img src="images/AudioDeepfakeDetectionAgent.png" width="800" alt="pipline">
 ---
 # 使用步骤
 ---
