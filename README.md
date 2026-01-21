@@ -13,7 +13,9 @@
 ---
 # 流水线
 
-<img src="images/AudioDeepfakeDetectionAgent.png" width="400" alt="pipline">
+<div align="center">
+  <img src="images/AudioDeepfakeDetectionAgent.png" width="400" alt="pipline">
+</div>
 
 ---
 # 使用步骤
