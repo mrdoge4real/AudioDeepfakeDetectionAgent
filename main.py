@@ -12,22 +12,18 @@ from autogen import AssistantAgent, UserProxyAgent
 from autogen.agentchat import Agent, ConversableAgent
 from typing import Dict, Any, List
 
-# ========== 导入独立的reference工具 ==========
 try:
     import reference_tool
-    # 直接映射函数，保留参数传递能力
     reference_tool_main = reference_tool.generate_reference_report
 except ImportError:
     sys.path.append(os.path.dirname(os.path.abspath(__file__)))
     import reference_tool
     reference_tool_main = reference_tool.generate_reference_report
 
-# ========== 基础配置 ==========
 sys.setrecursionlimit(2000)
 load_dotenv()
 sys.stdout.reconfigure(encoding='utf-8')
 
-# ========== 全局状态管理 ==========
 global_tool_results: Dict[str, Any] = {}
 current_step: int = 1
 tool_executed: List[str] = []
@@ -46,7 +42,6 @@ TOOL_REQUIRED_PARAMS = {
     "tool_generate_reference_report": ["audio_filename"]
 }
 
-# ========== 专业知识库（音频检测相关） ==========
 PROFESSIONAL_KNOWLEDGE = {
     "mfcc": """
 ### MFCC（梅尔频率倒谱系数）是什么？
@@ -90,7 +85,6 @@ MFCC是音频处理中最常用的声学特征之一，核心作用是模拟人�
 """
 }
 
-# ========== 路径处理工具 ==========
 def normalize_path(path: str) -> str:
     path = path.strip().strip('"\'')
     abs_path = os.path.abspath(path)
@@ -103,15 +97,12 @@ def extract_audio_path_from_text(text: str) -> str:
         return normalize_path(match.group(1))
     return ""
 
-# ========== 增强版意图识别（分层处理） ==========
 def recognize_user_intent(user_input: str, chat_history: List[str] = None) -> Dict[str, Any]:
     if chat_history is None:
         chat_history = []
     user_input = user_input.strip()
     lower_input = user_input.lower()
 
-    # 第一层：强规则识别核心指令（检测/退出）
-    # 1. 退出意图
     quit_patterns = [r'exit', r'quit', r'退出', r'结束', r'拜拜']
     for pattern in quit_patterns:
         if re.search(pattern, user_input, re.IGNORECASE):
@@ -121,15 +112,13 @@ def recognize_user_intent(user_input: str, chat_history: List[str] = None) -> Di
                 "reply": "👋 再见！如有音频检测需求，随时可以再来找我～"
             }
 
-    # 2. 检测意图（关键修改：兼容"纯路径"和"检测+路径"两种输入）
     audio_path = extract_audio_path_from_text(user_input)
-    if audio_path:  # 只要能提取到音频路径，就判定为检测意图
+    if audio_path:
         return {
             "intent": "detection",
             "audio_path": audio_path,
             "reply": ""
         }
-    # 原检测意图判定（保留，兼容"检测+路径"）
     elif re.search(r'检测', user_input):
         return {
             "intent": "invalid_detection",
@@ -137,7 +126,6 @@ def recognize_user_intent(user_input: str, chat_history: List[str] = None) -> Di
             "reply": "⚠️ 未识别到有效音频路径！\n请按格式输入：检测 + 音频文件绝对路径\n示例：检测 E:/DeepfakedetectionAgent/audio_files/uploads/LA_E_1000147.flac"
         }
 
-    # 第二层：专业问题识别（匹配知识库关键词）
     for keyword, content in PROFESSIONAL_KNOWLEDGE.items():
         if re.search(keyword, lower_input):
             return {
@@ -146,7 +134,6 @@ def recognize_user_intent(user_input: str, chat_history: List[str] = None) -> Di
                 "reply": content
             }
 
-    # 第三层：问候意图
     greeting_patterns = [r'你好', r'哈喽', r'hi', r'hello', r'嗨', r'早上好', r'下午好', r'晚上好']
     for pattern in greeting_patterns:
         if re.search(pattern, user_input, re.IGNORECASE):
@@ -156,16 +143,13 @@ def recognize_user_intent(user_input: str, chat_history: List[str] = None) -> Di
                 "reply": "你好😊！我是智能音频伪造检测助手～\n✅ 我能帮你检测音频是否被伪造，也能解答MFCC、异常值判定等专业问题\n📌 输入示例：\n- 检测 E:/xxx.flac\n- MFCC是什么？\n- 异常值怎么样就算伪造？"
             }
 
-    # 第四层：LLM兜底处理（闲聊/其他问题）
     return {
         "intent": "chat",
         "audio_path": "",
-        "reply": ""  # 空回复，交给LLM处理
+        "reply": ""
     }
 
-# ========== LLM闲聊/专业解答Agent ==========
 def get_chat_agent():
-    """创建专门处理闲聊和专业追问的Agent"""
     chat_agent = AssistantAgent(
         name="ChatAgent",
         system_message=f"""
@@ -180,30 +164,24 @@ def get_chat_agent():
 """,
         llm_config={
             "config_list": config_list,
-            "temperature": 0.7,  # 闲聊更自然
+            "temperature": 0.7,
             "max_tokens": 1000
         }
     )
-    # ========== 关键修改 ==========
     chat_user_proxy = UserProxyAgent(
         name="ChatUserProxy",
         human_input_mode="NEVER",
-        max_consecutive_auto_reply=0,  # 改为0，禁止自动二次回复
+        max_consecutive_auto_reply=0,
         code_execution_config={"use_docker": False},
-        # 新增终止规则：只要Agent回复了，就终止对话
         is_termination_msg=lambda msg: True if msg.get("content") else False
     )
     return chat_agent, chat_user_proxy
 
-# ========== 目录与阈值配置 ==========
-# 标准化路径函数
 def normalize_path_config(path):
-    """标准化路径，解决Windows分隔符问题"""
     if not path:
         return ""
     return os.path.normpath(os.path.abspath(path))
 
-# 软编码读取BASE_DIR + 严格校验
 BASE_DIR = os.getenv("BASE_DIR")
 BASE_DIR = normalize_path_config(BASE_DIR)
 if not BASE_DIR or not os.path.exists(BASE_DIR):
@@ -223,7 +201,6 @@ ANOMALY_THRESHOLDS = {
     "mel_energy_lower": -65.9447
 }
 
-# ========== LLM 配置 ==========
 config_list = [
     {
         "model": os.getenv("LLM_MODEL", "deepseek-reasoner"),
@@ -232,7 +209,6 @@ config_list = [
     }
 ]
 
-# ========== 工具声明 ==========
 tools_declaration = [
     {
         "name": "tool_convert_audio",
@@ -299,21 +275,17 @@ llm_config = {
     "max_tokens": 4096
 }
 
-# ========== 业务工具函数 ==========
-
 try:
     from anti_spoof_detector import run_anti_spoof_detection
     from asr_diarization import extract_asr_with_speaker_diarization
     from audio_converter import convert_audio_to_standard
     from suspicious_feature_extractor import extract_suspicious_segments_features as real_suspicious_feature_extractor
 except ImportError as e:
-    # 抛出更明确的异常，提示问题原因
     raise ImportError(
         f"导入核心音频处理模块失败：{e}\n"
         "请确保 anti_spoof_detector、asr_diarization 等模块已存在，且依赖已安装。"
     ) from e
 
-# 工具1：音频转换
 def tool_convert_audio(audio_path: str) -> str:
     global global_tool_results, current_step, tool_executed
     try:
@@ -339,7 +311,6 @@ def tool_convert_audio(audio_path: str) -> str:
         current_step = 1
         return json.dumps(result, ensure_ascii=False)
 
-# 工具2：反伪造检测
 def tool_anti_spoof_detection(standard_audio_path: str) -> str:
     global global_tool_results, current_step, tool_executed
     try:
@@ -352,11 +323,10 @@ def tool_anti_spoof_detection(standard_audio_path: str) -> str:
         result = {
             "success": spoof_result.get("success", False),
             "error": spoof_result.get("error", ""),
-            "suspicious_segments": suspicious_segments,  # 可疑片段列表
+            "suspicious_segments": suspicious_segments,
             "segment_count": len(suspicious_segments)
         }
         global_tool_results["tool_anti_spoof_detection"] = result
-        # 【新增】额外保存可疑片段到全局，供reference_tool直接读取
         global_tool_results["anti_spoof_suspicious_segments"] = suspicious_segments
         if "tool_anti_spoof_detection" not in tool_executed:
             tool_executed.append("tool_anti_spoof_detection")
@@ -369,7 +339,6 @@ def tool_anti_spoof_detection(standard_audio_path: str) -> str:
         current_step = 2
         return json.dumps(result, ensure_ascii=False)
 
-# 工具3：ASR+说话人分割
 def tool_asr_speaker_diarization(standard_audio_path: str) -> str:
     global global_tool_results, current_step, tool_executed
     try:
@@ -395,7 +364,6 @@ def tool_asr_speaker_diarization(standard_audio_path: str) -> str:
         current_step = 3
         return json.dumps(result, ensure_ascii=False)
 
-# 工具4：特征提取（修复lightweight_feature_data未定义问题）
 def tool_extract_features(audio_filename: str) -> str:
     global global_tool_results, current_step, tool_executed
     try:
@@ -404,7 +372,6 @@ def tool_extract_features(audio_filename: str) -> str:
             feature_result_str = json.dumps(feature_result_str)
         feature_result = json.loads(feature_result_str)
         
-        # 直接使用原始结果，不再调用lightweight_feature_data
         result = {
             "success": feature_result.get("success", False),
             "error": feature_result.get("error", ""),
@@ -426,11 +393,9 @@ def tool_extract_features(audio_filename: str) -> str:
 def tool_generate_reference_report(audio_filename: str) -> str:
     global global_tool_results, current_step, tool_executed
     try:
-        # 1. 调用生成函数（新增调试）
         print(f"📢 开始生成MD报告，音频名：{audio_filename}")
         ref_tool_result = reference_tool.generate_reference_report(audio_filename)
         
-        # 2. 打印返回结果（关键调试）
         print(f"📢 generate_reference_report返回：{ref_tool_result}")
         
         reference_result = {
@@ -442,17 +407,14 @@ def tool_generate_reference_report(audio_filename: str) -> str:
             "asr_text": global_tool_results.get("tool_asr_speaker_diarization", {}).get("full_text", "")
         }
 
-        # 3. 保存到全局状态
         global_tool_results["tool_generate_reference_report"] = reference_result
         tool_executed.append("tool_generate_reference_report")
         current_step = 6
 
-        # 4. 调试打印最终路径
         print(f"📢 最终存入全局的report_path：{reference_result['report_path']}")
         
         return json.dumps(reference_result, ensure_ascii=False, indent=2)
     except Exception as e:
-        # 新增：打印完整异常栈
         print(f"❌ 调用reference_tool失败：{str(e)}")
         traceback.print_exc()
         error_result = {
@@ -468,7 +430,6 @@ def tool_generate_reference_report(audio_filename: str) -> str:
         current_step = 6
         return json.dumps(error_result, ensure_ascii=False, indent=2)
 
-# ========== 自定义FeedbackUserProxyAgent ==========
 class FeedbackUserProxyAgent(UserProxyAgent):
     def _extract_function_call(self, message: str) -> Dict[str, Any]:
         try:
@@ -490,12 +451,10 @@ class FeedbackUserProxyAgent(UserProxyAgent):
 
     def generate_reply(self, messages: List[Dict[str, Any]], sender: Agent, **kwargs) -> str:
         global global_tool_results, current_step
-        # ===== 新增终止判定：如果current_step=6 且 最后一条消息包含"流程结束"，直接返回None =====
         last_msg = messages[-1]["content"].strip() if messages else ""
         if current_step == 6 and "流程结束" in last_msg:
-            return None  # 返回None会强制终止AutoGen对话循环
+            return None
         
-        # 以下原有逻辑保持不变
         if current_step == 6:
             return "所有工具执行完成，可生成最终报告"
 
@@ -510,7 +469,6 @@ class FeedbackUserProxyAgent(UserProxyAgent):
             else:
                 return f"错误：必须输出工具调用JSON，当前步骤 {current_step} 应调用工具 {STEP_TO_TOOL[current_step]}"
 
-        # 以下原有逻辑不变...
         tool_name = func_call["name"]
         tool_params = func_call["parameters"]
 
@@ -557,7 +515,7 @@ class FeedbackUserProxyAgent(UserProxyAgent):
     【工具执行结果】{tool_name}：执行成功
     【全局状态更新】所有工具执行完成，即将生成最终检测报告
     """
-            current_step = 6  # 立即标记为终止步骤
+            current_step = 6
         else:
             feedback_msg = f"""
     【工具执行结果】{tool_name}：
@@ -575,7 +533,6 @@ class FeedbackUserProxyAgent(UserProxyAgent):
     """
         return feedback_msg
 
-# ========== 检测智能体 ==========
 detection_agent = AssistantAgent(
     name="AudioDetectionAgent",
     system_message=f"""
@@ -605,20 +562,16 @@ detection_agent = AssistantAgent(
     }
 )
 
-# ========== 初始化反馈代理 ==========
 user_proxy = FeedbackUserProxyAgent(
     name="FeedbackUserProxy",
     system_message="你是用户代理，负责执行工具并反馈结果",
     code_execution_config={"work_dir": "work_dir", "use_docker": False},
     human_input_mode="NEVER",
-    max_consecutive_auto_reply=1,  # 仅允许1轮自动回复，避免循环
-    # 增强终止判定：包含"完成"或"结束"关键词就终止
+    max_consecutive_auto_reply=1,
     is_termination_msg=lambda msg: current_step == 6 or any(word in msg.get("content", "").lower() for word in ["完成", "结束", "流程结束"])
 )
 
-# ========== 报告生成函数 ==========
 def generate_detection_report(tool_results: Dict[str, Any]) -> str:
-    # ========== 1. 优先提取全局工具的真实执行数据 ==========
     anti_spoof_result = tool_results.get("tool_anti_spoof_detection", {})
     suspicious_segments = anti_spoof_result.get("suspicious_segments", [])
     suspicious_count = len(suspicious_segments)
@@ -629,15 +582,12 @@ def generate_detection_report(tool_results: Dict[str, Any]) -> str:
     convert_result = tool_results.get("tool_convert_audio", {})
     audio_filename = convert_result.get("audio_filename", "未知")
 
-    # ========== 2. 核心修复：主动调用 reference_tool 生成 MD 文件 ==========
     ref_full_content = ""
     ref_report_path = ""
     if audio_filename != "未知":
-        # 手动调用你验证过的 MD 生成函数
         md_result = reference_tool.generate_reference_report(audio_filename)
         if md_result.get("success"):
             ref_report_path = md_result.get("report_path")
-            # 读取生成好的 MD 文件内容
             if os.path.exists(ref_report_path):
                 with open(ref_report_path, "r", encoding="utf-8") as f:
                     ref_full_content = f.read()
@@ -647,7 +597,6 @@ def generate_detection_report(tool_results: Dict[str, Any]) -> str:
         else:
             ref_full_content = f"MD文件生成失败：{md_result.get('error')}"
     else:
-        # 兜底信息（仅音频名未知时用）
         suspicious_time_list = []
         for idx, seg in enumerate(suspicious_segments):
             start = seg.get("start", 0.0)
@@ -669,7 +618,6 @@ def generate_detection_report(tool_results: Dict[str, Any]) -> str:
 6. Reference报告状态：文件不存在（{ref_report_path}）
 """
 
-    # ========== 3. 构造提示词（LLM 读取真实 MD 内容） ==========
     prompt = f"""
 ### 强制指令（必须严格遵守）
 请基于以下完整的音频伪造检测MD报告内容，生成总结报告，**必须包含且明确标注以下4个核心字段**：
@@ -689,7 +637,6 @@ def generate_detection_report(tool_results: Dict[str, Any]) -> str:
 {ref_full_content}
 """
 
-    # ========== 4. LLM 生成最终报告 ==========
     report_agent = AssistantAgent(
         name="ReportAgent",
         system_message="""
@@ -721,18 +668,15 @@ def generate_detection_report(tool_results: Dict[str, Any]) -> str:
     
     final_report = ""
     for msg in chat_result.chat_history:
-        # 只取 ReportAgent 发送的消息
         if msg["name"] == "ReportAgent":
             final_report = msg["content"]
-            break  # 取第一条有效回复后立即退出
+            break
 
-    # 确保末尾有「流程结束」
     if "流程结束" not in final_report:
         final_report += "\n\n流程结束"
 
     return final_report
 
-# ========== 主对话入口（带记忆和分层意图） ==========
 def start_detection_chat():
     print("="*80)
     print("🎙️ 智能音频伪造检测助手（支持专业问答+闲聊）")
@@ -775,24 +719,20 @@ def start_detection_chat():
             chat_history.append(f"助手：{reply_msg}")
             continue
         elif intent_type == "detection":
-            # 重置工具执行状态
             global global_tool_results, current_step, tool_executed
             global_tool_results = {}
             current_step = 1
             tool_executed = []
             
             print(f"\n🚀 开始处理指令：检测 {audio_path}")
-            # 关键修复：设置 max_consecutive_auto_reply=1，只执行必要的工具调用，不重复生成报告
             chat_result = user_proxy.initiate_chat(
                 recipient=detection_agent,
                 message=f"检测 {audio_path}",
                 clear_history=True,
-                max_consecutive_auto_reply=1  # 仅1轮回复，执行完工具就停
+                max_consecutive_auto_reply=1
             )
             
-            # 手动提取并打印最终报告，不再依赖detection_agent重复输出
             if "tool_generate_reference_report" in tool_executed or current_step == 6:
-                # 在 start_detection_chat 函数里，生成报告前加：
                 print("===== 验证反伪造检测数据 =====")
                 print("可疑片段数：", len(global_tool_results.get("tool_anti_spoof_detection", {}).get("suspicious_segments", [])))
                 final_report = generate_detection_report(global_tool_results)
@@ -807,7 +747,6 @@ def start_detection_chat():
             else:
                 print("\n❌ 工具执行未完成，无法生成报告！\n")
                 chat_history.append(f"助手：检测失败，工具执行未完成")
-            # 强制回到输入框
             continue
         elif intent_type == "chat":
             chat_agent, chat_user_proxy = get_chat_agent()
@@ -833,7 +772,6 @@ def start_detection_chat():
             chat_history.append(f"助手：{llm_reply}")
             continue
 
-# ========== 程序入口 ==========
 if __name__ == "__main__":
-
     start_detection_chat()
+
