@@ -4,60 +4,39 @@ import numpy as np
 import librosa
 import torch
 from pathlib import Path
-from dotenv import load_dotenv  # 导入dotenv加载.env文件
+from dotenv import load_dotenv
 from transformers import AutoFeatureExtractor, AutoModelForAudioClassification
 
 
-# ====================== 1. 加载.env配置（核心） ======================
-# 加载.env文件（优先从脚本所在目录找，找不到则从项目根目录找）
-load_dotenv()  # 自动读取当前目录/.env文件
+load_dotenv()
 
-# 从.env读取配置，同时设置兜底值（避免配置缺失）
-# 项目根目录：优先用.env的BASE_DIR，否则动态推导
 BASE_DIR = os.getenv("BASE_DIR") or str(Path(__file__).resolve().parent.parent)
-# 本地模型路径（可选，这里暂时用不到，仅演示如何加载）
 LOCAL_MODEL_NAME = os.getenv("LOCAL_MODEL_NAME", "")
 
-# ====================== 2. 全局配置（基于.env的BASE_DIR） ======================
-# 跨平台输出目录：统一放在.env指定的BASE_DIR/outputs/anti_spoof
 OUTPUT_ROOT = Path(BASE_DIR) / "outputs" / "anti_spoof"
-OUTPUT_ROOT.mkdir(parents=True, exist_ok=True)  # 自动创建多级目录
+OUTPUT_ROOT.mkdir(parents=True, exist_ok=True)
 
-# 音频参数（保持不变）
 SAMPLE_RATE = 16000
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-WINDOW_SIZE = 0.5   # 秒
-HOP_SIZE = 0.1      # 秒
+WINDOW_SIZE = 0.5
+HOP_SIZE = 0.1
 FAKE_THRESHOLD = 0.7
 
 
-# ====================== 工具函数：提取音频文件名（去后缀） ======================
 def extract_audio_filename(audio_path):
-    """
-    跨平台提取音频文件名（去后缀），兼容Linux/Windows路径
-    示例1：/home/bowen/audio/LA_E_1000147.wav → LA_E_1000147
-    示例2：E:/audio/LA_E_1000147.wav → LA_E_1000147
-    """
     filename = Path(audio_path).stem
     return filename
 
 
-# ====================== 1. 加载 HuggingFace 模型 ======================
-
 def load_deepfake_model():
-    # 可选：如果模型路径也想从.env加载，可这样写
-    # model_name = os.getenv("ANTI_SPOOF_MODEL_NAME", "MelodyMachine/Deepfake-audio-detection-V2")
     model_name = "MelodyMachine/Deepfake-audio-detection-V2"
     
     feature_extractor = AutoFeatureExtractor.from_pretrained(
         model_name,
-        # 可选：从.env加载HF_TOKEN（私有模型需要）
-        # use_auth_token=os.getenv("HF_TOKEN", "")
     )
 
     model = AutoModelForAudioClassification.from_pretrained(
         model_name,
-        # use_auth_token=os.getenv("HF_TOKEN", "")
     )
 
     model.to(DEVICE)
@@ -65,7 +44,6 @@ def load_deepfake_model():
     return feature_extractor, model
 
 
-# ====================== 2. 单窗口推理 ======================
 @torch.no_grad()
 def infer_fake_prob(audio_segment, feature_extractor, model):
     inputs = feature_extractor(
@@ -79,10 +57,9 @@ def infer_fake_prob(audio_segment, feature_extractor, model):
     outputs = model(**inputs)
 
     probs = torch.softmax(outputs.logits, dim=-1)
-    return probs[0, 1].item()  # index 1 = fake
+    return probs[0, 1].item()
 
 
-# ====================== 3. 滑窗检测 ======================
 def sliding_window_detection(audio_path):
     audio, sr = librosa.load(str(audio_path), sr=SAMPLE_RATE, mono=True)
     duration = len(audio) / sr
@@ -107,7 +84,6 @@ def sliding_window_detection(audio_path):
     return fake_scores, time_stamps, duration
 
 
-# ====================== 4. 聚合可疑片段 ======================
 def extract_suspicious_segments(fake_scores, time_stamps, threshold):
     segments = []
     start_time = None
@@ -134,9 +110,7 @@ def extract_suspicious_segments(fake_scores, time_stamps, threshold):
     return segments
 
 
-# ====================== 5. Agent 主接口（基于.env路径保存） ======================
 def run_anti_spoof_detection(audio_path):
-    # 1. 跨平台标准化音频路径
     audio_path = Path(audio_path).resolve()
     if not audio_path.exists():
         return {
@@ -146,10 +120,8 @@ def run_anti_spoof_detection(audio_path):
             "data": {"suspicious_segments": []}
         }
 
-    # 2. 提取音频文件名
     audio_filename = extract_audio_filename(audio_path)
 
-    # 3. 执行检测
     fake_scores, time_stamps, duration = sliding_window_detection(audio_path)
     suspicious_segments = extract_suspicious_segments(
         fake_scores,
@@ -157,7 +129,6 @@ def run_anti_spoof_detection(audio_path):
         FAKE_THRESHOLD
     )
 
-    # 4. 构造结果
     result = {
         "agent": "Anti_Spoofing_Agent",
         "success": True,
@@ -176,7 +147,6 @@ def run_anti_spoof_detection(audio_path):
         }
     }
 
-    # 5. 保存JSON（路径基于.env的BASE_DIR）
     json_filename = f"{audio_filename}_anti_spoof.json"
     json_path = OUTPUT_ROOT / json_filename
     with open(json_path, "w", encoding="utf-8") as f:
@@ -187,9 +157,7 @@ def run_anti_spoof_detection(audio_path):
     return result
 
 
-# ====================== 6. 测试入口（基于.env配置） ======================
 if __name__ == "__main__":
-    # 测试路径：基于.env的BASE_DIR拼接，不再硬编码
     test_audio = Path(BASE_DIR) / "audio_files" / "standard_audio" / "LA_E_1000147.wav"
 
     print("===== Anti-Spoof 检测开始 =====")
