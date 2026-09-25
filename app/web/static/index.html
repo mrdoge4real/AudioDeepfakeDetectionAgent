@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>智能音频伪造检测</title>
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+         background: #f0f2f5; color: #333; }
+  header { background: #1a1a2e; color: #fff; padding: 14px 24px; }
+  header h1 { font-size: 18px; font-weight: 600; }
+  .container { display: flex; gap: 16px; padding: 16px; max-width: 1400px; margin: 0 auto;
+               height: calc(100vh - 52px); }
+  .panel { background: #fff; border-radius: 10px; padding: 18px;
+           box-shadow: 0 1px 4px rgba(0,0,0,.08); overflow-y: auto; }
+  #left { flex: 3; }
+  #right { flex: 2; display: flex; flex-direction: column; }
+  h2 { font-size: 15px; margin-bottom: 12px; color: #1a1a2e; }
+
+  #dropzone { border: 2px dashed #c0c4cc; border-radius: 10px; padding: 36px;
+              text-align: center; color: #909399; cursor: pointer; transition: .2s; }
+  #dropzone.dragover { border-color: #409eff; background: #ecf5ff; color: #409eff; }
+  #dropzone input { display: none; }
+
+  .progress-item { margin-top: 14px; padding: 12px; border: 1px solid #ebeef5;
+                   border-radius: 8px; }
+  .progress-item .fname { font-weight: 600; font-size: 13px; word-break: break-all; }
+  .bar { height: 6px; background: #ebeef5; border-radius: 3px; margin: 8px 0; overflow: hidden; }
+  .bar > div { height: 100%; background: #409eff; width: 0; transition: width .4s; }
+  .status-line { font-size: 12px; color: #606266; }
+  .status-line .err { color: #f56c6c; }
+  .badge { display: inline-block; font-size: 11px; padding: 1px 8px; border-radius: 8px;
+           margin-left: 6px; }
+  .badge.running { background: #ecf5ff; color: #409eff; }
+  .badge.done { background: #f0f9eb; color: #67c23a; }
+  .badge.failed { background: #fef0f0; color: #f56c6c; }
+
+  #report { margin-top: 16px; font-size: 13px; line-height: 1.7; }
+  #report h1 { font-size: 18px; } #report h2 { font-size: 15px; margin-top: 14px; }
+  #report h3 { font-size: 13px; margin-top: 10px; }
+  #report blockquote { border-left: 3px solid #409eff; padding-left: 10px;
+                       color: #606266; margin: 8px 0; }
+
+  #chat-box { flex: 1; overflow-y: auto; border: 1px solid #ebeef5; border-radius: 8px;
+              padding: 12px; margin-bottom: 10px; background: #fafafa; }
+  .msg { margin-bottom: 10px; display: flex; }
+  .msg .bubble { max-width: 85%; padding: 8px 12px; border-radius: 10px; font-size: 13px;
+                 line-height: 1.6; white-space: pre-wrap; word-break: break-word; }
+  .msg.user { justify-content: flex-end; }
+  .msg.user .bubble { background: #409eff; color: #fff; }
+  .msg.assistant .bubble { background: #fff; border: 1px solid #ebeef5; }
+  #chat-input-row { display: flex; gap: 8px; }
+  #chat-input { flex: 1; padding: 9px 12px; border: 1px solid #dcdfe6; border-radius: 8px;
+                font-size: 13px; outline: none; }
+  #chat-input:focus { border-color: #409eff; }
+  button { padding: 9px 18px; background: #409eff; color: #fff; border: none;
+           border-radius: 8px; cursor: pointer; font-size: 13px; }
+  button:disabled { background: #a0cfff; cursor: not-allowed; }
+</style>
+</head>
+<body>
+<header><h1>🎙️ 智能音频伪造检测系统</h1></header>
+<div class="container">
+  <div class="panel" id="left">
+    <h2>📤 上传音频检测</h2>
+    <div id="dropzone">
+      <p>点击选择或拖拽音频文件到此处</p>
+      <p style="font-size:12px;margin-top:6px">支持 flac / wav / mp3 / m4a / wma / ogg / aac</p>
+      <input type="file" id="file-input" accept=".flac,.wav,.mp3,.m4a,.wma,.ogg,.aac">
+    </div>
+    <div id="tasks"></div>
+    <div id="report"></div>
+  </div>
+  <div class="panel" id="right">
+    <h2>💬 智能助手</h2>
+    <div id="chat-box"></div>
+    <div id="chat-input-row">
+      <input id="chat-input" placeholder="问问我检测结果 / MFCC 是什么…" />
+      <button id="chat-send">发送</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+const dropzone = $('dropzone'), fileInput = $('file-input');
+let sessionId = localStorage.getItem('chat_session') || '';
+const pollers = {};
+
+// ---------- 上传 ----------
+dropzone.onclick = () => fileInput.click();
+dropzone.ondragover = e => { e.preventDefault(); dropzone.classList.add('dragover'); };
+dropzone.ondragleave = () => dropzone.classList.remove('dragover');
+dropzone.ondrop = e => {
+  e.preventDefault(); dropzone.classList.remove('dragover');
+  if (e.dataTransfer.files.length) upload(e.dataTransfer.files[0]);
+};
+fileInput.onchange = () => fileInput.files.length && upload(fileInput.files[0]);
+
+async function upload(file) {
+  const fd = new FormData();
+  fd.append('file', file);
+  const card = addTaskCard(file.name);
+  try {
+    const res = await fetch('/api/detect', { method: 'POST', body: fd });
+    if (!res.ok) throw new Error((await res.json()).detail || res.statusText);
+    const data = await res.json();
+    pollers[data.task_id] = setInterval(() => poll(data.task_id, card), 2000);
+  } catch (e) {
+    card.querySelector('.status-line').innerHTML = `<span class="err">上传失败：${e.message}</span>`;
+  }
+}
+
+function addTaskCard(name) {
+  const div = document.createElement('div');
+  div.className = 'progress-item';
+  div.innerHTML = `<div class="fname">${name}<span class="badge running">排队中</span></div>
+    <div class="bar"><div></div></div><div class="status-line">已提交，等待执行…</div>`;
+  $('tasks').prepend(div);
+  return div;
+}
+
+// ---------- 进度轮询 ----------
+async function poll(taskId, card) {
+  try {
+    const res = await fetch(`/api/tasks/${taskId}?include_report=true`);
+    if (!res.ok) return;
+    const t = await res.json();
+    const badge = card.querySelector('.badge');
+    const bar = card.querySelector('.bar > div');
+    const line = card.querySelector('.status-line');
+    bar.style.width = (t.step / 5 * 100) + '%';
+    badge.className = 'badge ' + t.status;
+    badge.textContent = { pending: '排队中', running: '检测中', done: '已完成', failed: '失败' }[t.status] || t.status;
+
+    if (t.status === 'running') line.textContent = `步骤 ${t.step}/5 ${t.step_name}：${t.message}`;
+    if (t.status === 'failed') {
+      line.innerHTML = `<span class="err">${t.error || '检测失败'}</span>`;
+      clearInterval(pollers[taskId]);
+    }
+    if (t.status === 'done') {
+      line.textContent = '✅ 检测完成，报告如下：';
+      clearInterval(pollers[taskId]);
+      $('report').innerHTML = marked.parse(t.report_content || '（无报告内容）');
+      $('report').scrollIntoView({ behavior: 'smooth' });
+    }
+  } catch (e) { /* 网络抖动忽略，下轮重试 */ }
+}
+
+// ---------- 聊天 ----------
+function addMsg(role, text) {
+  const div = document.createElement('div');
+  div.className = 'msg ' + role;
+  div.innerHTML = `<div class="bubble"></div>`;
+  div.querySelector('.bubble').textContent = text;
+  $('chat-box').appendChild(div);
+  $('chat-box').scrollTop = $('chat-box').scrollHeight;
+  return div;
+}
+
+async function sendChat() {
+  const input = $('chat-input');
+  const text = input.value.trim();
+  if (!text) return;
+  input.value = '';
+  addMsg('user', text);
+  const thinking = addMsg('assistant', '思考中…');
+  $('chat-send').disabled = true;
+  try {
+    const res = await fetch('/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: text, session_id: sessionId }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || res.statusText);
+    sessionId = data.session_id;
+    localStorage.setItem('chat_session', sessionId);
+    thinking.querySelector('.bubble').textContent = data.reply;
+  } catch (e) {
+    thinking.querySelector('.bubble').textContent = '⚠️ ' + e.message;
+  } finally {
+    $('chat-send').disabled = false;
+    $('chat-box').scrollTop = $('chat-box').scrollHeight;
+  }
+}
+$('chat-send').onclick = sendChat;
+$('chat-input').onkeydown = e => e.key === 'Enter' && sendChat();
+
+addMsg('assistant', '你好😊 我是音频伪造检测助手。左侧上传音频即可开始检测；也可以问我「MFCC 是什么」「异常值怎么判定」这类专业问题，检测完成后还能问我「刚才的音频有问题吗」。');
+</script>
+</body>
+</html>

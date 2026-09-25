@@ -1,160 +1,135 @@
 # 智能音频伪造检测智能体
----
-一款**基于 AutoGen 框架构建**的**全流程自动化音频伪造检测智能体**，专为识别 AI 生成 / TTS/ VC音频设计，集成「意图理解、多步骤检测、专业报告生成」能力，无需人工干预即可完成从音频标准化到伪造风险判定的完整流程，同时支持专业知识库问答与日常闲聊交互。
+
+一款基于 **FastAPI + 原生 Function Calling Agent** 的**全流程自动化音频伪造（Deepfake）检测服务**，专为识别 AI 生成 / TTS / VC 音频设计。上传音频即可自动完成「格式标准化 → 反伪造初检 → ASR+说话人分割 → 特征提取 → 报告生成」五步流水线，并通过真·智能体提供对话式结果解读与专业知识问答。
 
 ---
-# **核心优势**
 
-- 🚀 **全自动化**：严格遵循「格式转换→反伪造初检→ASR + 说话人分割→特征提取→报告生成」五步流程，工具调用**零人工介入**；
-- 🎯 **精准识别 + 本地路径兼容**：基于 MFCC、梅尔能量等核心特征，结合 LibriSpeech 样本训练阈值精准**标记可疑伪造片段，同时支持自动解析本地音频绝对路径，无需手动格式转换；
-- 📊 **标准化报告**：自动**生成包含可疑片段详情、ASR 语音内容、风险等级（低 / 中 / 高）的结构化报告**，支持追溯原始检测数据；
-- 💬 **多意图 + 多轮记忆**：兼容检测指令、音频专业知识问答（如 MFCC 原理）、日常闲聊，且**具备多轮对话记忆**，无需重复输入历史指令或路径；
-- 🛡️ **稳定可靠**：**支持任何格式的音频文件**，内置参数校验、异常捕获、状态重置机制，禁用 Docker 依赖，**适配 Windows 路径规范**，部署门槛低。
----
-# 流水线
+## 架构
 
-<div align="center">
-  <img src="images/AudioDeepfakeDetectionAgent.png" width="400" alt="pipline">
-</div>
-
----
-# 使用步骤
----
-## 依赖安装
 ```
-#克隆仓库
-git clone https://github.com/mrdoge4real/AudioDeepfakeDetectionAgent.git
+┌─────────────────────────────────────────┐
+│  FastAPI 服务层                          │
+│  POST /api/detect (multipart 上传)       │
+│  GET  /api/tasks/{id}  (状态/进度/报告)   │
+│  POST /api/chat    (对话式 Agent)        │
+├─────────────────────────────────────────┤
+│  真·Agent 层（对话大脑）                  │
+│  LLM (原生 function calling) 自主决策：   │
+│  get_task_status / get_report /          │
+│  list_history / explain_knowledge        │
+├─────────────────────────────────────────┤
+│  确定性流水线层（纯代码编排，零 LLM）      │
+│  convert → anti_spoof → asr →           │
+│  features → report                       │
+├─────────────────────────────────────────┤
+│  能力模块层（模型单例，启动预热）          │
+│  Deepfake 检测模型 / Whisper / pyannote  │
+└─────────────────────────────────────────┘
+```
 
+### 与旧版（main 分支）的区别
+
+| | 旧版 | 新版 |
+|---|---|---|
+| 交互方式 | 命令行 + 正则解析 Windows 路径 | Web 页面上传（multipart）+ REST API |
+| "Agent" | LLM 被强制输出固定 JSON，实为状态机 | 检测流水线纯代码执行；对话层 LLM 自主 function calling |
+| 模型加载 | 每次检测重新加载 3 个模型 | 启动预热 + 全局单例 |
+| 任务执行 | 同步阻塞 | 异步任务 + 进度轮询，SQLite 持久化 |
+| LLM | 锁死 deepseek-reasoner | 任意 OpenAI 兼容端点可配置（默认 deepseek-chat） |
+
+---
+
+## 部署
+
+### 1. 环境准备
+
+```bash
+git clone https://github.com/mrdoge4real/AudioDeepfakeDetectionAgent.git
 cd AudioDeepfakeDetectionAgent
 
-#安装虚拟环境和依赖
 conda create -n antiagent python=3.9
-
 conda activate antiagent
 
 pip install -r requirements.txt
-```
-## 填写API
-```
-# 在.env中填写API，我们在测试时分别使用了DeepSeek-reasoner和Qwen-max
 
-BASE_DIR=#此处填本地仓库地址
+# PyTorch 按平台单独安装：
+#   Mac (CPU/MPS):   pip install torch torchaudio
+#   Linux/Win CUDA:  pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu121
 
-HF_TOKEN=#由于要使用ASR工具，此处填HuggingFace
-
-LLM_API_KEY=# 替换成你自己DeepSeek API Key
-
-LLM_API_BASE=
-
-LLM_MODEL=deepseek-reasoner
+# ffmpeg 必须可用：
+#   Mac: brew install ffmpeg    Ubuntu: apt install ffmpeg    Windows: 下载 ffmpeg 并加入 PATH
 ```
-## 进行检测
+
+### 2. 配置 `.env`
+
+```bash
+cp .env.example .env
 ```
-python main.py
+
+```ini
+# HuggingFace Token（说话人分割需要；需先在 HF 网站接受 pyannote/speaker-diarization 协议）
+HF_TOKEN=hf_xxx
+
+# LLM：需要支持 function calling 的模型（默认 DeepSeek）
+LLM_API_KEY=sk-xxx
+LLM_API_BASE=https://api.deepseek.com
+LLM_MODEL=deepseek-chat
+
+# 通义千问示例：
+# LLM_API_BASE=https://dashscope.aliyuncs.com/compatible-mode/v1
+# LLM_MODEL=qwen-plus
 ```
+
+### 3. 启动服务
+
+```bash
+python -m app.main
+# 或 uvicorn app.main:app --host 0.0.0.0 --port 8000
+```
+
+打开 http://localhost:8000 ，上传音频即可检测，右侧可与智能助手对话。
+
+首次启动会下载 Whisper / Deepfake 检测模型（约数 GB），pyannote 在首次检测时下载。
 
 ---
-# 效果
 
-## 检测
+## API
 
-1. 输入本地需要检测音频的绝对路径,以下为示范
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| POST | `/api/detect` | multipart 上传音频（字段名 `file`），返回 `task_id` |
+| GET | `/api/tasks/{id}` | 查询任务状态/进度，`?include_report=true` 附带报告全文 |
+| GET | `/api/tasks` | 最近 20 条任务历史 |
+| POST | `/api/chat` | 对话 `{"message": "...", "session_id": "可选"}` |
+| GET | `/health` | 健康检查 |
 
-```
-================================================================================
-🎙️ 智能音频伪造检测助手（支持专业问答+闲聊）
-================================================================================
-✅ 我能做：
-  1. 检测音频是否被伪造（格式：检测 + 音频绝对路径）
-  2. 解答专业问题（比如：MFCC是什么？异常值怎么判定？）
-  3. 日常闲聊（打招呼、简单问答）
-🚪 退出指令：exit/退出/拜拜
-================================================================================
-
-请输入你的指令： /AudioDeepfakeDetectionAgent/uploads/xxxx.flac
-```
-
-2. 检测结果：
-```
-================================================================================
-🎯 最终检测报告：
-================================================================================
-### 音频伪造检测总结报告
-
-**【可疑片段数量】**
-1个。
-
-**【可疑片段时间段】**
-- 第1段：0.0s - 2.7s。
-
-**【ASR语音内容】**
-What‘s the point in coming here to sit in the stand and watch the test matches?
-
-**【风险等级+异常特征】**
-存在伪造风险。核心异常特征为：梅尔能量均值(-43.2dB)偏高（正常≤-43.5002dB）。
-
-流程结束
-=========
-```
----
-## 闲聊和询问专业知识
-
-效果展示
-```
-请输入你的指令：你好
-
-🤖 你好😊！我是智能音频伪造检测助手～
-✅ 我能帮你检测音频是否被伪造，也能解答MFCC、异常值判定等专业问题
-📌 输入示例：
-- 检测 E:/xxx.flac
-- MFCC是什么？
-- 异常值怎么样就算伪造？
+```bash
+# 示例
+curl -F "file=@LA_E_1000147.flac" http://localhost:8000/api/detect
+curl "http://localhost:8000/api/tasks/<task_id>?include_report=true"
+curl -X POST http://localhost:8000/api/chat \
+     -H "Content-Type: application/json" \
+     -d '{"message": "刚才检测的音频有问题吗？"}'
 ```
 
-```
-请输入你的指令：今天天气怎么样
+## 测试
 
-
-🤖 今天天气嘛，我可没法实时感知哦！😊 作为专注于音频伪造检测的助手，我的“视野”主要在声音特征分析这块儿。
-
-你可以轻松地用手机上的天气应用，或者直接搜“天气”来查看实时预报，这样会更准确。希望你有晴朗愉快的一天！如果对音频检测有任何好奇，随时可以问我～ 🌤️
+```bash
+pip install pytest httpx
+python -m pytest tests/   # 接口层与 Agent 循环均打桩，不需要下载模型
 ```
 
-```
-请输入你的指令：伪造音频要如何鉴别
+## 检测原理
 
-🤖 鉴别伪造音频，我们的系统主要靠“抓特征”和“看异常”两大手段。简单来说，**就像验钞机识别假币的防伪点一样**，我们会分析声 音里那些AI伪造容易露馅的痕迹。
+- **反伪造初检**：`MelodyMachine/Deepfake-audio-detection-V2` 模型，0.5s 窗口 / 0.1s 步长滑窗，伪造概率 ≥ 0.7 的连续区间标记为可疑片段
+- **ASR + 说话人分割**：Whisper 词级时间戳 + pyannote diarization，按词中点时间对齐说话人
+- **异常判定**：可疑片段的 MFCC / 梅尔能量与 LibriSpeech dev-clean 500 条真人语音统计阈值（3σ 原则）比对：
+  - MFCC 均值绝对值 > 0.5，或整体标准差 > 35.0141 → 异常
+  - 梅尔能量均值超出 -65.9447 ~ -43.5002 dB → 异常
+- **风险等级**：低风险（无异常）/ 中等风险（1-3 个可疑片段）/ 高风险（≥3 个或占比 >10%）
 
-**主要技术手段：**
-1. **抓MFCC特征**
-   - 真实人声的MFCC特征（一种模拟人耳听感的特征）分布很自然，而AI伪造的声音常会出现**均值绝对值超过0.5**、**整体标准差超过35**等异常波动。
+## 性能（旧版流水线，ASVspoof2019 LA-dev）
 
-2. **查梅尔能量断层**
-   - 真实音频在不同频段的能量分布是平滑的，伪造音频则可能在某个频段突然**飙高或骤降**（比如超出正常范围 -65.9 ~ -43.5） 。
-
-**如何判断？——看异常点**
-我们会用一套统计阈值（基于大量真实音频总结的）来扫描：
-- 如果某个语音片段同时触发**≥2个异常条件**（比如MFCC均值异常+能量断层），就标记为“可疑片段”。
-- 当整段音频中**可疑片段占比 > 10%**，就会判定为“**存在伪造嫌疑**”。
-
-**最后给你的结论：**
-我们会根据异常片段的数量和比例，给出风险等级：
-- **低风险**：没发现异常，声音特征都很自然。
-- **中等风险**：零星异常（≤10%可疑片段），建议进一步核查。
-- **高风险**：异常片段多或集中，很可能经过伪造或AI生成。
-
-总之，鉴别靠的是**综合比对多个声学特征**，而不是单一指标。如果你有具体音频需要检测，我们可以走完整流程（标准化→分割→特征提取→异常判定）帮你分析～ 🎧
-```
----
-# 音频伪造检测性能
----
-我们以ASVSpoof2019LA-dev作为我们的测试集进行性能测试，测试结果如下：
-
-| 准确率 | 精确率 | 召回率 | F1值 |
-| :------- | :------- | :------- | :------- | 
+| 准确率 | 精确率 | 召回率 | F1 |
+|---|---|---|---|
 | 0.7587 | 0.8811 | 0.8452 | 0.8628 |
-
----
-# 备注
-
-我们进行MFCC和梅尔谱图对比的阈值**基于Lbrispeech统计**。
