@@ -28,7 +28,7 @@ def run_pipeline(audio_path: str, on_progress: ProgressCallback = None) -> dict:
     steps_done = []
 
     try:
-        # 延迟导入重型模块（librosa/torch/whisper/pyannote）
+        # 延迟导入重型模块（librosa/torch/funasr/pyannote）
         from app.modules import (
             anti_spoof, asr_diarization, audio_converter, feature_extractor,
             report_generator,

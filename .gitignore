@@ -177,4 +177,9 @@ cython_debug/
 data/
 audio_files/
 outputs/
-work_dir/.venv-test/
+work_dir/
+# 模型文件不进仓库，但保留下载脚本
+models/*
+!models/download_models.sh
+.venv-test/
+

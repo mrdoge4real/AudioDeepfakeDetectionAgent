@@ -12,8 +12,21 @@ from app.config import (
 from app.core.model_registry import DEVICE, get_deepfake_model
 
 
+def _fake_label_index(model) -> int:
+    """从模型配置动态解析 'fake' 标签的下标，避免硬编码索引（该模型 id2label 为 {0: fake, 1: real}）。"""
+    id2label = getattr(model.config, "id2label", {}) or {}
+    for idx, label in id2label.items():
+        if any(k in str(label).lower() for k in ("fake", "spoof", "bonafide-fake")):
+            return int(idx)
+    # 兜底：二分类时取非 real/bonafide 的那个
+    for idx, label in id2label.items():
+        if not any(k in str(label).lower() for k in ("real", "bonafide", "genuine")):
+            return int(idx)
+    return 0
+
+
 @torch.no_grad()
-def _infer_fake_prob(audio_segment, feature_extractor, model) -> float:
+def _infer_fake_prob(audio_segment, feature_extractor, model, fake_idx: int) -> float:
     inputs = feature_extractor(
         audio_segment, sampling_rate=SAMPLE_RATE,
         return_tensors="pt", padding=True,
@@ -21,7 +34,7 @@ def _infer_fake_prob(audio_segment, feature_extractor, model) -> float:
     inputs = {k: v.to(DEVICE) for k, v in inputs.items()}
     outputs = model(**inputs)
     probs = torch.softmax(outputs.logits, dim=-1)
-    return probs[0, 1].item()
+    return probs[0, fake_idx].item()
 
 
 def _sliding_window_detection(audio_path: Path):
@@ -29,6 +42,7 @@ def _sliding_window_detection(audio_path: Path):
     duration = len(audio) / sr
 
     feature_extractor, model = get_deepfake_model()
+    fake_idx = _fake_label_index(model)
 
     window_len = int(WINDOW_SIZE * sr)
     hop_len = int(HOP_SIZE * sr)
@@ -36,7 +50,7 @@ def _sliding_window_detection(audio_path: Path):
     fake_scores, time_stamps = [], []
     for start in range(0, len(audio) - window_len + 1, hop_len):
         segment = audio[start:start + window_len]
-        fake_scores.append(round(_infer_fake_prob(segment, feature_extractor, model), 4))
+        fake_scores.append(round(_infer_fake_prob(segment, feature_extractor, model, fake_idx), 4))
         time_stamps.append(round(start / sr, 3))
 
     return fake_scores, time_stamps, duration

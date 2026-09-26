@@ -1,5 +1,9 @@
 # -*- coding: utf-8 -*-
-"""步骤3：ASR 语音识别（Whisper）+ 说话人分割（pyannote），按词中点时间对齐。"""
+"""步骤3：ASR 语音识别（FunASR Paraformer）+ 说话人分割（pyannote），按词中点时间对齐。
+
+Paraformer 输出 token 级时间戳（中文每字一个 token，英文按字母切分），
+这里把时间戳合并成词级：连续英文字母合成一个词，每个中文字独立成词。
+"""
 import json
 import traceback
 from pathlib import Path
@@ -7,7 +11,7 @@ from pathlib import Path
 import librosa
 
 from app.config import ASR_OUTPUT_DIR, SAMPLE_RATE
-from app.core.model_registry import get_diarization_pipeline, get_whisper_model
+from app.core.model_registry import get_asr_model, get_diarization_pipeline
 
 
 def _save_result(result: dict, audio_filename: str):
@@ -18,6 +22,60 @@ def _save_result(result: dict, audio_filename: str):
         print(f"📁 ASR 结果已保存：{json_path}")
     except Exception as e:
         print(f"❌ 保存 ASR JSON 失败：{e}")
+
+
+def _tokens_to_words(text: str, timestamp_ms: list) -> list:
+    """把 token 级时间戳合并成词级 [{word, start, end}]（秒）。
+
+    text 中空格仅用于分隔英文字母 token，不参与时间戳对齐。
+    时间戳缺失/对不上时返回空列表，由调用方兜底。
+    """
+    chars = [c for c in text if c != " "]
+    if not chars or not timestamp_ms or len(chars) != len(timestamp_ms):
+        return []
+
+    def is_latin(c: str) -> bool:
+        return c.isascii() and (c.isalnum() or c in "'-")
+
+    words = []
+    cur_chars, cur_start, cur_end = [], None, None
+
+    def flush():
+        nonlocal cur_chars, cur_start, cur_end
+        if cur_chars:
+            words.append({
+                "word": "".join(cur_chars),
+                "start": cur_start / 1000.0,
+                "end": cur_end / 1000.0,
+            })
+            cur_chars, cur_start, cur_end = [], None, None
+
+    for ch, (s_ms, e_ms) in zip(chars, timestamp_ms):
+        if is_latin(ch):
+            if not cur_chars:
+                cur_start = s_ms
+            cur_chars.append(ch)
+            cur_end = e_ms
+        else:
+            flush()
+            words.append({"word": ch, "start": s_ms / 1000.0, "end": e_ms / 1000.0})
+    flush()
+    return words
+
+
+def _run_asr(audio_path: Path, duration: float) -> tuple:
+    """返回 (full_text, words)。words 为空时退化为整段一个词条。"""
+    model = get_asr_model()
+    res = model.generate(input=str(audio_path), batch_size_s=300)
+    item = res[0] if res else {}
+    full_text = (item.get("text") or "").strip()
+    timestamp = item.get("timestamp") or []
+
+    words = _tokens_to_words(full_text, timestamp)
+    if not words and full_text:
+        # 无词级时间戳时整段兜底
+        words = [{"word": full_text, "start": 0.0, "end": float(duration)}]
+    return full_text, words
 
 
 def extract_asr_with_speaker_diarization(audio_path: str, save_json: bool = True) -> dict:
@@ -39,29 +97,14 @@ def extract_asr_with_speaker_diarization(audio_path: str, save_json: bool = True
         audio, sr = librosa.load(str(audio_path), sr=SAMPLE_RATE, mono=True)
         duration = librosa.get_duration(y=audio, sr=sr)
 
-        whisper_model = get_whisper_model()
-        asr_result = whisper_model.transcribe(
-            str(audio_path),
-            language="en",
-            task="transcribe",
-            word_timestamps=True,
-            verbose=False,
-        )
-
-        words = []
-        for seg in asr_result.get("segments", []):
-            for w in seg.get("words", []):
-                words.append({
-                    "word": w["word"].strip(),
-                    "start": float(w["start"]),
-                    "end": float(w["end"]),
-                })
+        full_text, words = _run_asr(audio_path, duration)
 
         diarization = get_diarization_pipeline()(audio_path)
-
+        # pyannote 4.x 返回 DiarizeOutput（标注在 .speaker_diarization），3.x 直接返回 Annotation
+        annotation = getattr(diarization, "speaker_diarization", diarization)
         speaker_segments = [
             {"speaker_id": speaker, "start": float(turn.start), "end": float(turn.end)}
-            for turn, _, speaker in diarization.itertracks(yield_label=True)
+            for turn, _, speaker in annotation.itertracks(yield_label=True)
         ]
 
         aligned_words = []
@@ -83,8 +126,8 @@ def extract_asr_with_speaker_diarization(audio_path: str, save_json: bool = True
             "success": True,
             "audio_filename": audio_filename,
             "error": None,
-            "language": "en",
-            "full_text": asr_result.get("text", "").strip(),
+            "asr_engine": "paraformer",
+            "full_text": full_text,
             "segments": aligned_words,
             "total_words": len(aligned_words),
             "total_speakers": len({w["speaker_id"] for w in aligned_words}),

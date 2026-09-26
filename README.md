@@ -23,7 +23,7 @@
 │  features → report                       │
 ├─────────────────────────────────────────┤
 │  能力模块层（模型单例，启动预热）          │
-│  Deepfake 检测模型 / Whisper / pyannote  │
+│  Deepfake 检测模型 / Paraformer / pyannote│
 └─────────────────────────────────────────┘
 ```
 
@@ -47,8 +47,8 @@
 git clone https://github.com/mrdoge4real/AudioDeepfakeDetectionAgent.git
 cd AudioDeepfakeDetectionAgent
 
-conda create -n antiagent python=3.9
-conda activate antiagent
+conda create -n antiagent311 python=3.11
+conda activate antiagent311
 
 pip install -r requirements.txt
 
@@ -89,7 +89,11 @@ python -m app.main
 
 打开 http://localhost:8000 ，上传音频即可检测，右侧可与智能助手对话。
 
-首次启动会下载 Whisper / Deepfake 检测模型（约数 GB），pyannote 在首次检测时下载。
+模型用脚本统一下载到 `models/` 目录（每个模型一个文件夹，下完即离线可用）：
+
+```bash
+bash models/download_models.sh
+```
 
 ---
 
@@ -122,7 +126,7 @@ python -m pytest tests/   # 接口层与 Agent 循环均打桩，不需要下载
 ## 检测原理
 
 - **反伪造初检**：`MelodyMachine/Deepfake-audio-detection-V2` 模型，0.5s 窗口 / 0.1s 步长滑窗，伪造概率 ≥ 0.7 的连续区间标记为可疑片段
-- **ASR + 说话人分割**：Whisper 词级时间戳 + pyannote diarization，按词中点时间对齐说话人
+- **ASR + 说话人分割**：FunASR Paraformer 词级时间戳 + pyannote diarization，按词中点时间对齐说话人
 - **异常判定**：可疑片段的 MFCC / 梅尔能量与 LibriSpeech dev-clean 500 条真人语音统计阈值（3σ 原则）比对：
   - MFCC 均值绝对值 > 0.5，或整体标准差 > 35.0141 → 异常
   - 梅尔能量均值超出 -65.9447 ~ -43.5002 dB → 异常

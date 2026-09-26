@@ -1,11 +1,24 @@
 # -*- coding: utf-8 -*-
 """步骤1：音频格式标准化 —— 任意格式 → 16kHz 单声道 WAV（ffmpeg）。"""
+import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import librosa
 
 from app.config import SAMPLE_RATE, STANDARD_AUDIO_DIR
+
+
+def _find_ffmpeg() -> str:
+    """优先 PATH；未激活 conda 环境时回退到解释器同目录（conda env bin）。"""
+    ff = shutil.which("ffmpeg")
+    if ff:
+        return ff
+    candidate = Path(sys.executable).parent / "ffmpeg"
+    if candidate.exists():
+        return str(candidate)
+    return "ffmpeg"  # 让 subprocess 报错，错误信息会写进 result
 
 
 def convert_audio_to_standard(input_audio_path: str) -> dict:
@@ -26,7 +39,7 @@ def convert_audio_to_standard(input_audio_path: str) -> dict:
 
     try:
         cmd = [
-            "ffmpeg", "-i", str(input_path),
+            _find_ffmpeg(), "-i", str(input_path),
             "-ar", str(SAMPLE_RATE), "-ac", "1",
             "-f", "wav", "-y", str(output_path),
         ]

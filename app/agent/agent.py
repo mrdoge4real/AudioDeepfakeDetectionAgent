@@ -6,7 +6,9 @@ from openai import OpenAI
 
 from app.agent.knowledge import KNOWLEDGE_BASE
 from app.agent.tools import TOOL_HANDLERS, TOOL_SCHEMAS
-from app.config import AGENT_MAX_TOOL_ROUNDS, LLM_API_BASE, LLM_API_KEY, LLM_MODEL
+from app.config import (
+    AGENT_MAX_TOOL_ROUNDS, LLM_API_BASE, LLM_API_KEY, LLM_MODEL, LLM_TEMPERATURE,
+)
 from app.core import tasks
 
 SYSTEM_PROMPT = f"""
@@ -37,12 +39,15 @@ class ChatAgent:
         self.model = LLM_MODEL
 
     def _call_llm(self, messages: list) -> dict:
+        kwargs = {}
+        if LLM_TEMPERATURE:
+            kwargs["temperature"] = float(LLM_TEMPERATURE)
         resp = self.client.chat.completions.create(
             model=self.model,
             messages=messages,
             tools=TOOL_SCHEMAS,
             tool_choice="auto",
-            temperature=0.7,
+            **kwargs,
         )
         return resp.choices[0].message
 
