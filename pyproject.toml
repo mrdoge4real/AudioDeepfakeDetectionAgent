@@ -1,0 +1,44 @@
+[project]
+name = "audio-deepfake-detection-agent"
+version = "0.2.0"
+description = "基于 FastAPI + Function Calling Agent 的音频伪造检测服务"
+requires-python = ">=3.11,<3.13"
+dependencies = [
+    # Web 服务
+    "fastapi>=0.115",
+    "uvicorn>=0.32",
+    "python-multipart>=0.0.9",
+    # LLM（OpenAI 兼容 SDK，支持 DeepSeek / Qwen / Kimi 等）
+    "openai>=1.58",
+    # 音频处理
+    "librosa>=0.11",
+    "soundfile>=0.13",
+    "funasr>=1.2.0",
+    "pyannote-audio>=4.0.0",
+    "transformers>=4.57",
+    # ffmpeg 二进制（imageio-ffmpeg 自带各平台 ffmpeg 可执行文件）
+    "imageio-ffmpeg>=0.5",
+    # 科学计算（numba>=0.60 起才有 cp311 wheel）
+    "numpy>=1.26",
+    "numba>=0.60",
+    "scipy>=1.13",
+    "scikit-learn>=1.6",
+    "pandas>=2.3",
+    "matplotlib>=3.10",
+    # 工具
+    "python-dotenv>=1.0",
+    "omegaconf>=2.3",
+    "tqdm>=4.66",
+    "requests>=2.32",
+    "pyyaml>=6.0",
+    "pydantic>=2.10",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8",
+    "httpx>=0.27",
+]
+
+[tool.uv]
+package = false

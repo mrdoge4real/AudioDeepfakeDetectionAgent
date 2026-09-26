@@ -99,7 +99,12 @@ def extract_asr_with_speaker_diarization(audio_path: str, save_json: bool = True
 
         full_text, words = _run_asr(audio_path, duration)
 
-        diarization = get_diarization_pipeline()(audio_path)
+        # 传 waveform 而不是文件路径：绕过 torchcodec 对 FFmpeg 共享库的依赖
+        import torch
+        waveform = torch.from_numpy(audio).unsqueeze(0).float()
+        diarization = get_diarization_pipeline()(
+            {"waveform": waveform, "sample_rate": SAMPLE_RATE}
+        )
         # pyannote 4.x 返回 DiarizeOutput（标注在 .speaker_diarization），3.x 直接返回 Annotation
         annotation = getattr(diarization, "speaker_diarization", diarization)
         speaker_segments = [

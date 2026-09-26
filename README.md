@@ -41,24 +41,25 @@
 
 ## 部署
 
-### 1. 环境准备
+### 1. 环境准备（uv）
 
 ```bash
+# 安装 uv（任选其一）
+curl -LsSf https://astral.sh/uv/install.sh | sh
+# brew install uv
+
 git clone https://github.com/mrdoge4real/AudioDeepfakeDetectionAgent.git
 cd AudioDeepfakeDetectionAgent
 
-conda create -n antiagent311 python=3.11
-conda activate antiagent311
+# 一键复现环境：自动下载 Python 3.11、创建 .venv、安装全部依赖
+uv sync
+# 国内网络可加镜像：UV_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple uv sync
 
-pip install -r requirements.txt
-
-# PyTorch 按平台单独安装：
-#   Mac (CPU/MPS):   pip install torch torchaudio
-#   Linux/Win CUDA:  pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu121
-
-# ffmpeg 必须可用：
-#   Mac: brew install ffmpeg    Ubuntu: apt install ffmpeg    Windows: 下载 ffmpeg 并加入 PATH
+# 激活环境
+source .venv/bin/activate
 ```
+
+> Linux/Windows 需要 CUDA 版 PyTorch 时：`uv pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu121`
 
 ### 2. 配置 `.env`
 
@@ -67,17 +68,24 @@ cp .env.example .env
 ```
 
 ```ini
-# HuggingFace Token（说话人分割需要；需先在 HF 网站接受 pyannote/speaker-diarization 协议）
-HF_TOKEN=hf_xxx
+# LLM：需要支持 function calling 的模型（OpenAI 兼容端点皆可）
+# Kimi 示例：
+LLM_API_KEY=sk-kimi-xxx
+LLM_API_BASE=https://api.kimi.com/coding/v1
+LLM_MODEL=kimi-for-coding
+LLM_TEMPERATURE=1
+# DeepSeek 示例：
+# LLM_API_KEY=sk-xxx
+# LLM_API_BASE=https://api.deepseek.com
+# LLM_MODEL=deepseek-chat
+```
 
-# LLM：需要支持 function calling 的模型（默认 DeepSeek）
-LLM_API_KEY=sk-xxx
-LLM_API_BASE=https://api.deepseek.com
-LLM_MODEL=deepseek-chat
+模型用脚本统一下载到 `models/` 目录（每个模型一个文件夹，下完即离线可用）：
 
-# 通义千问示例：
-# LLM_API_BASE=https://dashscope.aliyuncs.com/compatible-mode/v1
-# LLM_MODEL=qwen-plus
+```bash
+bash models/download_models.sh
+# pyannote 是受限模型：先 hf auth login 并在 HF 网页接受协议；
+# 也可以找已下载的同事直接拷贝 models/ 目录
 ```
 
 ### 3. 启动服务

@@ -11,13 +11,18 @@ from app.config import SAMPLE_RATE, STANDARD_AUDIO_DIR
 
 
 def _find_ffmpeg() -> str:
-    """优先 PATH；未激活 conda 环境时回退到解释器同目录（conda env bin）。"""
+    """查找 ffmpeg：PATH → 解释器同目录（conda env）→ imageio-ffmpeg 自带二进制。"""
     ff = shutil.which("ffmpeg")
     if ff:
         return ff
     candidate = Path(sys.executable).parent / "ffmpeg"
     if candidate.exists():
         return str(candidate)
+    try:
+        import imageio_ffmpeg
+        return imageio_ffmpeg.get_ffmpeg_exe()
+    except Exception:
+        pass
     return "ffmpeg"  # 让 subprocess 报错，错误信息会写进 result
 
 
