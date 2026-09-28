@@ -95,12 +95,45 @@ python -m app.main
 # 或 uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
 
-打开 http://localhost:8000 ，上传音频即可检测，右侧可与智能助手对话。
+打开 http://localhost:8000 ，上传音频即可检测，右侧可与智能助手对话（详见下文「使用方式」）。
 
 模型用脚本统一下载到 `models/` 目录（每个模型一个文件夹，下完即离线可用）：
 
 ```bash
 bash models/download_models.sh
+```
+
+---
+
+## 使用方式
+
+服务启动后有两种客户端，都是纯接口调用方，可分开使用：
+
+### Web 仪表盘
+
+浏览器打开 http://localhost:8000 ，三栏布局：
+
+| 左栏 | 中栏 | 右栏 |
+|---|---|---|
+| 📤 上传音频（拖拽/点击） | 📄 检测报告（Markdown 渲染，风险等级彩色徽章） | 💬 智能助手对话 |
+| 🗂 检测历史（3s 自动刷新进度，点击看报告） | | 可查结果、问专业问题 |
+
+### CLI 客户端
+
+```bash
+python -m client detect /path/to/audio.flac   # 上传并等待检测报告（带进度条）
+python -m client history                      # 任务列表
+python -m client status <task_id>             # 查询任务进度
+python -m client report <task_id>             # 查看检测报告
+python -m client chat                         # 对话模式（记住会话，支持多轮）
+python -m client chat -m "刚才的音频有问题吗"   # 单条提问
+```
+
+连接远程服务（服务部署在 GPU 服务器、本地只跑客户端）：
+
+```bash
+python -m client --server http://<服务器IP>:8000 detect /path/to/audio.flac
+# 或设环境变量：export ADD_SERVER=http://<服务器IP>:8000
 ```
 
 ---
