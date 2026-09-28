@@ -278,7 +278,11 @@ async function sendChat() {
   }
 }
 $('chat-send').onclick = sendChat;
-$('chat-input').onkeydown = e => e.key === 'Enter' && sendChat();
+// 注意：onkeydown 处理器返回 false 会阻止默认行为（导致无法删除文字），
+// 所以这里用语句而不是 && 表达式；isComposing 避免中文输入法候选时误发送
+$('chat-input').onkeydown = e => {
+  if (e.key === 'Enter' && !e.isComposing) sendChat();
+};
 
 addMsg('assistant', '你好😊 上传音频后我会自动开始检测；检测完可以问我「这个音频有问题吗」，也可以问 MFCC、异常判定这类专业问题。');
 </script>

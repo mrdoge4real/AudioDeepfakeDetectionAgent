@@ -97,12 +97,6 @@ python -m app.main
 
 打开 http://localhost:8000 ，上传音频即可检测，右侧可与智能助手对话（详见下文「使用方式」）。
 
-模型用脚本统一下载到 `models/` 目录（每个模型一个文件夹，下完即离线可用）：
-
-```bash
-bash models/download_models.sh
-```
-
 ---
 
 ## 使用方式
@@ -159,9 +153,10 @@ curl -X POST http://localhost:8000/api/chat \
 
 ## 测试
 
+`uv sync` 已包含 pytest / httpx（dev 依赖组），直接运行：
+
 ```bash
-pip install pytest httpx
-python -m pytest tests/   # 接口层与 Agent 循环均打桩，不需要下载模型
+uv run pytest tests/   # 接口层与 Agent 循环均打桩，不需要下载模型
 ```
 
 ## 检测原理
