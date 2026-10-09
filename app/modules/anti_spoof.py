@@ -12,45 +12,45 @@ from app.config import (
 from app.core.model_registry import DEVICE, get_deepfake_model
 
 
-def _fake_label_index(model) -> int:
-    """从模型配置动态解析 'fake' 标签的下标，避免硬编码索引（该模型 id2label 为 {0: fake, 1: real}）。"""
-    id2label = getattr(model.config, "id2label", {}) or {}
-    for idx, label in id2label.items():
-        if any(k in str(label).lower() for k in ("fake", "spoof", "bonafide-fake")):
-            return int(idx)
-    # 兜底：二分类时取非 real/bonafide 的那个
-    for idx, label in id2label.items():
-        if not any(k in str(label).lower() for k in ("real", "bonafide", "genuine")):
-            return int(idx)
-    return 0
+def _prepare_input(audio_segment, target_len: int):
+    """对齐官方 inference.py 的预处理：峰值归一化 + 中央裁剪/平铺填充到定长。"""
+    import numpy as np
+    x = np.asarray(audio_segment, dtype=np.float32)
+    peak = np.abs(x).max()
+    if peak > 0:
+        x = x / peak
+    if len(x) >= target_len:
+        start = (len(x) - target_len) // 2
+        return x[start:start + target_len]
+    repeats = int(np.ceil(target_len / len(x)))
+    return np.tile(x, repeats)[:target_len]
 
 
 @torch.no_grad()
-def _infer_fake_prob(audio_segment, feature_extractor, model, fake_idx: int) -> float:
-    inputs = feature_extractor(
-        audio_segment, sampling_rate=SAMPLE_RATE,
-        return_tensors="pt", padding=True,
-    )
-    inputs = {k: v.to(DEVICE) for k, v in inputs.items()}
-    outputs = model(**inputs)
-    probs = torch.softmax(outputs.logits, dim=-1)
-    return probs[0, fake_idx].item()
+def _infer_fake_prob(audio_segment, model) -> float:
+    """模型输出 logit，sigmoid(logit)=P(real)（训练标签 1=real, 0=fake）。"""
+    x = _prepare_input(audio_segment, int(WINDOW_SIZE * SAMPLE_RATE))
+    waveform = torch.from_numpy(x).unsqueeze(0).to(DEVICE)
+    logit = model(waveform)
+    real_prob = torch.sigmoid(logit).item()
+    return 1.0 - real_prob
 
 
 def _sliding_window_detection(audio_path: Path):
     audio, sr = librosa.load(str(audio_path), sr=SAMPLE_RATE, mono=True)
     duration = len(audio) / sr
 
-    feature_extractor, model = get_deepfake_model()
-    fake_idx = _fake_label_index(model)
+    model = get_deepfake_model()
 
     window_len = int(WINDOW_SIZE * sr)
     hop_len = int(HOP_SIZE * sr)
 
     fake_scores, time_stamps = [], []
-    for start in range(0, len(audio) - window_len + 1, hop_len):
+    # 音频不足一个窗口时，用整段（模型内部会 pad 到定长）
+    starts = list(range(0, max(len(audio) - window_len + 1, 1), hop_len))
+    for start in starts:
         segment = audio[start:start + window_len]
-        fake_scores.append(round(_infer_fake_prob(segment, feature_extractor, model, fake_idx), 4))
+        fake_scores.append(round(_infer_fake_prob(segment, model), 4))
         time_stamps.append(round(start / sr, 3))
 
     return fake_scores, time_stamps, duration
@@ -63,7 +63,7 @@ def _extract_suspicious_segments(fake_scores, time_stamps, threshold):
         if score >= threshold:
             if start_time is None:
                 start_time = t
-            end_time = t + HOP_SIZE
+            end_time = t + WINDOW_SIZE
         elif start_time is not None:
             segments.append({"start": round(start_time, 3), "end": round(end_time, 3)})
             start_time = None
@@ -71,7 +71,7 @@ def _extract_suspicious_segments(fake_scores, time_stamps, threshold):
     if start_time is not None:
         segments.append({
             "start": round(start_time, 3),
-            "end": round(time_stamps[-1] + HOP_SIZE, 3),
+            "end": round(time_stamps[-1] + WINDOW_SIZE, 3),
         })
     return segments
 

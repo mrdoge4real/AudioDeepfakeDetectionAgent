@@ -29,21 +29,58 @@ _diarization = None
 
 
 def get_deepfake_model():
-    """返回 (feature_extractor, model)，全局单例。"""
+    """加载 WavLM+AASIST 伪造检测模型（自定义结构），全局单例。
+
+    模型仓库自带 model.py / 权重，不走 transformers AutoModel：
+    输出单个 logit，sigmoid(logit)=P(real)，伪造概率 = 1 - sigmoid(logit)。
+    """
     global _deepfake
     if _deepfake is None:
         with _lock:
             if _deepfake is None:
-                from transformers import (
-                    AutoFeatureExtractor,
-                    AutoModelForAudioClassification,
-                )
-                fe = AutoFeatureExtractor.from_pretrained(DEEPFAKE_MODEL_NAME)
-                model = AutoModelForAudioClassification.from_pretrained(DEEPFAKE_MODEL_NAME)
-                model.to(DEVICE)
-                model.eval()
-                _deepfake = (fe, model)
+                _deepfake = _load_forensics_detector()
     return _deepfake
+
+
+def _load_forensics_detector():
+    import importlib.util
+    import sys
+    from pathlib import Path
+
+    repo = Path(DEEPFAKE_MODEL_NAME)
+    if not repo.exists():
+        # 在线仓库 id：先拉取快照到 HF 缓存
+        from huggingface_hub import snapshot_download
+        repo = Path(snapshot_download(DEEPFAKE_MODEL_NAME))
+
+    # 动态加载仓库自带的 model.py（DeepfakeDetector 内部会加载 microsoft/wavlm-large）
+    sys.path.insert(0, str(repo))
+    try:
+        spec = importlib.util.spec_from_file_location("forensics_model", repo / "model.py")
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+    finally:
+        sys.path.remove(str(repo))
+
+    model = mod.DeepfakeDetector()
+
+    # 优先 safetensors 权重，兜底 .pt
+    from safetensors.torch import load_file
+    weights = sorted(repo.glob("*.safetensors"))
+    if weights:
+        state = load_file(str(weights[0]))
+    else:
+        pts = sorted(repo.glob("*.pt"))
+        if not pts:
+            raise FileNotFoundError(f"模型仓库缺少权重文件：{repo}")
+        state = torch.load(str(pts[0]), map_location="cpu", weights_only=False)
+    if isinstance(state, dict) and "model_state_dict" in state:
+        state = state["model_state_dict"]
+    model.load_state_dict(state, strict=False)
+
+    model.to(DEVICE)
+    model.eval()
+    return model
 
 
 def get_asr_model():

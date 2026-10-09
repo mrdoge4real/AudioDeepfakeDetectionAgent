@@ -9,8 +9,14 @@
 set -e
 cd "$(dirname "$0")"
 
-# Deepfake 反伪造检测模型
-hf download MelodyMachine/Deepfake-audio-detection-V2 --local-dir deepfake-audio-detection-V2
+# 与服务端 app/config.py 保持一致：HF 缓存放 models/huggingface
+export HF_HOME="$(pwd)/huggingface"
+
+# Deepfake 反伪造检测模型（WavLM-large + AASIST，仓库自带 model.py + 权重）
+hf download eliya/forensics_0.3B_wavlm_oc_softmax_deepfake_classifier --local-dir forensics_0.3B_wavlm_oc_softmax_deepfake_classifier
+
+# 上面模型的骨干网络（model.py 内部按 HF 缓存加载，不放本地目录）
+hf download microsoft/wavlm-large
 
 # Paraformer 中文语音识别（FunASR）
 hf download funasr/paraformer-zh --local-dir paraformer-zh

@@ -12,7 +12,7 @@ STEPS = [
     (2, "反伪造初检", "正在用 Deepfake 模型滑窗扫描可疑片段…"),
     (3, "ASR+说话人分割", "正在识别语音内容并对齐说话人…"),
     (4, "特征提取", "正在提取可疑片段的 MFCC / 梅尔频谱特征…"),
-    (5, "报告生成", "正在比对阈值并生成分析报告…"),
+    (5, "报告生成", "正在汇总检测结果并生成分析报告…"),
 ]
 
 ProgressCallback = Optional[Callable[[int, str, str], None]]  # (step, step_name, message)
@@ -36,7 +36,7 @@ def run_pipeline(audio_path: str, on_progress: ProgressCallback = None) -> dict:
     except ImportError as e:
         return {
             "success": False,
-            "error": f"音频处理依赖缺失：{e}（请先 pip install -r requirements.txt）",
+            "error": f"音频处理依赖缺失：{e}（请先 uv sync 安装依赖）",
             "failed_step": 0,
             "steps": [],
         }

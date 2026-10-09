@@ -83,13 +83,14 @@ def _prefer_local(local_name: str, hub_id: str) -> str:
 # 音频处理参数
 # ---------------------------------------------------------------------------
 SAMPLE_RATE = 16000
-# 反伪造滑窗
-WINDOW_SIZE = 0.5
-HOP_SIZE = 0.1
-FAKE_THRESHOLD = 0.7
-# Deepfake 检测模型
+# 反伪造滑窗（WavLM 检测模型输入定长 5s）
+WINDOW_SIZE = 5.0
+HOP_SIZE = 1.0
+FAKE_THRESHOLD = 0.5
+# Deepfake 检测模型（WavLM-large + AASIST，自定义结构，权重为 safetensors）
 DEEPFAKE_MODEL_NAME = _clean_env("DEEPFAKE_MODEL_NAME") or _prefer_local(
-    "deepfake-audio-detection-V2", "MelodyMachine/Deepfake-audio-detection-V2"
+    "forensics_0.3B_wavlm_oc_softmax_deepfake_classifier",
+    "eliya/forensics_0.3B_wavlm_oc_softmax_deepfake_classifier",
 )
 # Paraformer ASR 模型（FunASR）
 PARAFORMER_MODEL = _clean_env("PARAFORMER_MODEL") or _prefer_local(
